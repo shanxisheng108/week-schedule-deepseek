@@ -1,0 +1,14 @@
+{
+  "name": "week-schedule-deepseek",
+  "version": "1.0.0",
+  "private": true,
+  "description": "接入 DeepSeek API 的日程管理小工具（周视图 + 优先级标注）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/core.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

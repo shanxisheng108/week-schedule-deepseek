@@ -1,0 +1,35 @@
+# ---------- 依赖（本项目当前零依赖，为将来引入预留） ----------
+node_modules/
+.pnp.*
+.yarn/cache/
+.yarn/install-state.gz
+
+# ---------- 环境变量与密钥 ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# ---------- 本项目 / 工具产物 ----------
+.workbuddy/
+.shots/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# ---------- 编辑器与系统文件 ----------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 临时文件与构建产物（本项目无构建步骤，留作占位） ----------
+*.tmp
+*.bak
+*~
+dist/
+build/

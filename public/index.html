@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>日程 · 周视图</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">周</div>
+        <div class="brand-text">
+          <h1>日程 · 周视图</h1>
+          <p id="weekLabel">正在加载…</p>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="nav-group" role="group" aria-label="周切换">
+          <button id="prevWeekBtn" class="icon-btn" title="上一周" aria-label="上一周">‹</button>
+          <button id="todayBtn" class="today-btn">今天</button>
+          <button id="nextWeekBtn" class="icon-btn" title="下一周" aria-label="下一周">›</button>
+        </div>
+        <button id="settingsBtn" class="ghost-btn">设置</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="calendar-panel">
+        <div class="panel-head">
+          <h2>本周安排</h2>
+          <div class="panel-head-right">
+            <div class="legend" aria-label="优先级图例">
+              <span class="legend-item"><i class="dot p-high"></i>高</span>
+              <span class="legend-item"><i class="dot p-medium"></i>中</span>
+              <span class="legend-item"><i class="dot p-low"></i>低</span>
+            </div>
+            <button id="todayAgendaBtn" class="today-agenda-btn" type="button">今日日程</button>
+          </div>
+        </div>
+        <div class="calendar-scroll" id="calendarScroll">
+          <table class="week-table" id="weekTable">
+            <thead id="weekHead"></thead>
+            <tbody id="weekBody"></tbody>
+          </table>
+        </div>
+        <p class="empty-hint" id="emptyHint" hidden>这一周还没有安排。在右侧用一句话描述你的日程，AI 会自动排进来。</p>
+      </section>
+
+      <aside class="side">
+        <section class="card search-card">
+          <div class="card-head">
+            <h2>搜索日程</h2>
+            <span class="count-badge" id="searchCount">0</span>
+          </div>
+          <div class="search-row">
+            <input id="searchInput" type="search" placeholder="搜索详情原文，如：樱顶、论文" autocomplete="off" spellcheck="false" aria-label="搜索日程">
+            <button id="searchBtn" class="primary-btn small" type="button">搜索</button>
+          </div>
+          <p class="card-note">在全部日程（含「待安排」）的详情原文中匹配，不区分大小写；清空关键词即恢复全部。</p>
+          <p class="search-meta" id="searchMeta"></p>
+          <div class="search-results" id="searchResults"></div>
+          <p class="search-empty" id="searchEmpty" hidden></p>
+        </section>
+
+        <section class="card composer">
+          <div class="card-head">
+            <h2>AI 添加日程</h2>
+            <span class="tag" id="engineTag">DeepSeek</span>
+          </div>
+          <textarea id="naturalInput" rows="5" placeholder="用一句话描述，例如：&#10;明天下午三点半在樱顶开会，讨论毕业论文选题；周五晚上七点线上腾讯会议，聊课题进展。"></textarea>
+          <div class="composer-actions">
+            <button id="extractBtn" class="primary-btn">
+              <span class="btn-label">提取并添加</span>
+            </button>
+            <button id="sampleBtn" class="ghost-btn small">示例</button>
+            <button id="clearBtn" class="ghost-btn small">清空本周</button>
+          </div>
+          <p class="status" id="statusLine" role="status"></p>
+        </section>
+
+        <section class="card pending-card">
+          <div class="card-head">
+            <h2>待安排</h2>
+            <span class="count-badge" id="pendingCount">0</span>
+          </div>
+          <p class="card-note">原文里没说清日期的事件会先放这里，不会替你猜。</p>
+          <div id="pendingList" class="pending-list"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <!-- 便签详情 -->
+  <div class="overlay" id="overlay" hidden></div>
+
+  <div class="modal note-modal" id="noteModal" hidden role="dialog" aria-modal="true" aria-label="事件便签">
+    <button class="modal-close" id="noteClose" aria-label="关闭">×</button>
+    <div id="noteContent"></div>
+  </div>
+
+  <!-- 今日日程 -->
+  <div class="modal today-modal" id="todayModal" hidden role="dialog" aria-modal="true" aria-label="今日日程">
+    <button class="modal-close" id="todayClose" aria-label="关闭">×</button>
+    <h2 class="modal-title">今日日程</h2>
+    <p class="today-date" id="todayDate"></p>
+    <div class="today-list" id="todayList"></div>
+    <p class="modal-empty" id="todayEmpty" hidden></p>
+  </div>
+
+  <!-- 设置 -->
+  <div class="modal settings-modal" id="settingsModal" hidden role="dialog" aria-modal="true" aria-label="设置">
+    <button class="modal-close" id="settingsClose" aria-label="关闭">×</button>
+    <h2 class="modal-title">设置</h2>
+
+    <label class="field-label" for="apiKeyInput">DeepSeek API Key</label>
+    <div class="key-row">
+      <input id="apiKeyInput" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
+      <button id="toggleKeyBtn" class="ghost-btn small">显示</button>
+    </div>
+    <p class="field-hint">
+      密钥只保存在本机浏览器（localStorage），经本地服务转发给 DeepSeek，不经过任何第三方。
+      也可以在启动服务前设置环境变量 <code>DEEPSEEK_API_KEY</code>。
+    </p>
+    <p class="server-note" id="serverNote"></p>
+
+    <div class="modal-actions">
+      <button id="saveKeyBtn" class="primary-btn">保存</button>
+      <button id="clearKeyBtn" class="ghost-btn">清除密钥</button>
+    </div>
+
+    <div class="tech-note">
+      <h3>技术栈</h3>
+      <ul>
+        <li>前端：原生 HTML / CSS / JavaScript 单页，无框架、无构建步骤</li>
+        <li>后端：Node.js 原生 http 模块（零 npm 依赖），负责静态托管与 DeepSeek 代理</li>
+        <li>模型：deepseek-chat，JSON 模式输出，temperature 0.1</li>
+        <li>存储：浏览器 localStorage</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
