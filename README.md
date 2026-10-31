@@ -21,7 +21,136 @@ node server.js
 
 ---
 
-## 二、配置 DeepSeek API Key
+## 二、安装说明
+
+面向第一次把这个项目跑起来的开发者。全程**不需要 `npm install`**，唯一的硬性依赖是 Node.js。
+
+### 环境要求
+
+| 依赖 | 版本要求 | 说明 |
+| --- | --- | --- |
+| **Node.js** | **≥ 18.0**（本机实测 v22） | 服务端用到了全局 `fetch`，18 起才内置；16 会直接报 `fetch is not defined` |
+| npm | 不强制 | 项目零依赖，`package.json` 里没有 `dependencies` 字段 |
+| 浏览器 | Chrome / Edge / Firefox 近两年版本 | 需要 localStorage 与 CSS Grid / Flex |
+| 操作系统 | Windows / macOS / Linux | 仅 Windows 提供 `start.bat` 双击启动 |
+| DeepSeek API Key | 可选 | 不配也能运行，自动降级为本地规则解析 |
+
+### 步骤总览
+
+| 步骤 | 执行命令 | 依赖环境 | 预期结果 |
+| --- | --- | --- | --- |
+| 1 确认版本 | `node -v` | 系统终端可用 | 输出 `v18.x.x` 及以上 |
+| 2 获取代码 | `git clone …` / Download ZIP | Git 2.x（可绕过） | 目录含 `server.js`、`public/` |
+| 3 安装依赖 | `npm install`（可跳过） | npm，随 Node 附带 | 瞬间结束，无 `node_modules/` |
+| 4 配密钥（可选） | `DEEPSEEK_API_KEY=… node server.js` | DeepSeek 账号 | 日志显示「已通过环境变量配置」 |
+| 5 启动服务 | `node server.js` | Node ≥ 18 | 打印 `http://127.0.0.1:5173` |
+| 6 打开浏览器 | 访问 `http://127.0.0.1:5173` | Chrome / Edge / Firefox | 出现周视图与右侧三块面板 |
+| 7 跑测试 | `node test/core.test.js` | Node ≥ 18（`node:assert` 内置） | `21 通过 / 0 失败` |
+
+### 第 1 步：确认 Node 版本
+
+```bash
+node -v
+```
+
+**预期结果**：输出 `v18.x.x` 及以上（如 `v22.20.0`）。
+若提示 `command not found` 或版本低于 18，到 [nodejs.org](https://nodejs.org) 安装 LTS 版后重开终端。
+
+### 第 2 步：获取代码
+
+```bash
+git clone https://github.com/shanxisheng108/week-schedule-deepseek.git
+cd week-schedule-deepseek
+```
+
+没装 Git 时可改为：仓库首页 `Code → Download ZIP`，解压后进入目录。
+
+**预期结果**：目录下能看到 `server.js`、`public/`、`package.json`、`start.bat`。
+
+### 第 3 步：安装依赖（可跳过）
+
+```bash
+npm install
+```
+
+**预期结果**：命令瞬间结束，**不会生成 `node_modules/`**——本项目没有任何第三方依赖。这一步完全可以省略，不影响后续运行。
+
+### 第 4 步：配置 DeepSeek API Key（可选）
+
+不配也能用，只是抽取精度从「大模型」降为「正则规则」。两种配置方式：
+
+```bash
+# macOS / Linux
+DEEPSEEK_API_KEY=sk-xxxxxxxx node server.js
+```
+
+```powershell
+# Windows PowerShell
+$env:DEEPSEEK_API_KEY = "sk-xxxxxxxx"; node server.js
+```
+
+也可以先启动、再在页面右上角「设置」里粘贴密钥（存在浏览器 localStorage）。完整说明见第四节。
+
+**预期结果**：启动日志中 `API Key` 一行显示「已通过环境变量配置」；若走页面设置，则状态栏不再提示「未配置 API Key」。
+
+### 第 5 步：启动服务
+
+```bash
+node server.js
+# 或 npm start
+# Windows 也可双击 start.bat（会自动打开浏览器）
+```
+
+**预期结果**：终端打印
+
+```
+  日程管理小工具 · 已启动
+  本地地址   http://127.0.0.1:5173
+  DeepSeek   https://api.deepseek.com
+  API Key    未配置（可在页面右上角「设置」中填写）
+```
+
+端口被占用时换一个：`PORT=5174 node server.js`（PowerShell 下 `$env:PORT=5174; node server.js`）。
+
+### 第 6 步：打开浏览器验证
+
+访问 **http://127.0.0.1:5173**。
+
+**预期结果**：出现周视图——周一至周日的空表格，右侧依次是「搜索日程」「AI 添加日程」「待安排」三块。
+在「AI 添加日程」输入 `明天下午三点半在樱顶开会，讨论毕业论文选题` 并点「提取并添加」，表格里应新出现一张带色条的事件卡。
+
+### 第 7 步：跑单元测试确认环境无问题
+
+```bash
+node test/core.test.js
+# 或 npm test
+```
+
+**预期结果**：末尾输出
+
+```
+结果：21 通过 / 0 失败
+```
+
+出现 `0 失败` 即表示 Node 版本与核心逻辑均正常；若有用例失败，通常是 Node 版本低于 18。
+
+---
+
+## 三、使用示例
+
+下面两张截图取自实际运行界面（2026 年 10 月 26 日当周，共 20 条日程）。
+
+![周视图：七天按时间槽排满日程卡片，红、琥珀、青绿三色分别对应高、中、低优先级](images/week-view.png)
+
+*图 1　**周视图**：事件按开始时间落进对应时间槽，左侧色条 + 浅色底区分高/中/低优先级；没有具体时刻的日程落在顶部「全天」行；右侧「搜索日程」默认列出全部已保存日程（此处 20 条），底部「待安排」收纳原文未提及日期的条目。*
+
+![事件详情：点击日程卡片后弹出的便签窗口](images/note-modal.png)
+
+*图 2　**事件详情弹窗**：点击任意日程卡弹出便签，展示事件名、时间、地点、详情四项；底部一行是可复制的标准格式文本【事件名 - 时间 - 地点 - 详情】，再下方三个按钮可即时切换高/中/低优先级，右侧可复制便签或删除该事件。*
+
+---
+
+## 四、配置 DeepSeek API Key
 
 两种方式，任选其一：
 
@@ -54,7 +183,7 @@ set DEEPSEEK_API_KEY=sk-xxxxxxxx && node server.js
 
 ---
 
-## 三、技术栈
+## 五、技术栈
 
 | 层 | 选型 | 说明 |
 | --- | --- | --- |
@@ -71,7 +200,7 @@ set DEEPSEEK_API_KEY=sk-xxxxxxxx && node server.js
 
 ---
 
-## 四、DeepSeek 调用方式
+## 六、DeepSeek 调用方式
 
 **端点**：`POST https://api.deepseek.com/chat/completions`（OpenAI 兼容格式）
 
@@ -119,7 +248,7 @@ set DEEPSEEK_API_KEY=sk-xxxxxxxx && node server.js
 
 ---
 
-## 五、五个核心功能怎么实现的
+## 七、五个核心功能怎么实现的
 
 ### 1. AI 信息提取
 
@@ -167,7 +296,7 @@ set DEEPSEEK_API_KEY=sk-xxxxxxxx && node server.js
 
 ---
 
-## 六、目录结构
+## 八、目录结构
 
 ```
 记事本工具/
@@ -175,6 +304,10 @@ set DEEPSEEK_API_KEY=sk-xxxxxxxx && node server.js
 ├── package.json         # 仅声明 start / test 脚本，无依赖
 ├── start.bat            # Windows 双击启动
 ├── README.md
+├── .gitignore           # 排除 node_modules / .env / 本地工作目录
+├── images/              # README 引用的截图
+│   ├── week-view.png    # 周视图
+│   └── note-modal.png   # 事件详情弹窗
 ├── public/
 │   ├── index.html       # 页面骨架
 │   ├── styles.css       # 全部样式（浅色主题，响应式）
@@ -188,7 +321,7 @@ set DEEPSEEK_API_KEY=sk-xxxxxxxx && node server.js
 
 ---
 
-## 七、测试
+## 九、测试
 
 ```bash
 node test/core.test.js
@@ -207,7 +340,7 @@ node test/core.test.js
 
 ---
 
-## 八、已知边界
+## 十、已知边界
 
 - 时间槽以 1 小时为粒度，`14:30` 的事件会落在 `14:00` 那一行，卡片上仍显示准确的 `14:30`；
 - 搜索只匹配「详情」字段（原始输入），不搜标题与地点；需要按地点找时，建议把地点也写进原话（AI 提取的详情本身就是原话，通常已包含）；
