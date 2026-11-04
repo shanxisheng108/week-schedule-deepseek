@@ -185,5 +185,113 @@ test('长文本只截取命中附近片段并加省略号', () => {
   assert.ok(html.length < long.length);
 });
 
+console.log('\n时段类（持续多天）');
+
+test('isSpan 只认「跨越一天的区间」，同日结束不算', () => {
+  assert.strictEqual(core.isSpan({ date: '2026-10-26', endDate: '2026-11-01' }), true);
+  assert.strictEqual(core.isSpan({ date: '2026-10-26', endDate: '2026-10-26' }), false);
+  assert.strictEqual(core.isSpan({ date: '2026-10-26', startTime: '09:00', endTime: '11:00' }), false);
+  assert.strictEqual(core.isSpan({ date: null, endDate: '2026-11-01' }), false);
+});
+
+test('occursOn：区间闭区间内每天命中，区间外不命中', () => {
+  const e = { date: '2026-10-26', endDate: '2026-11-01' };
+  assert.strictEqual(core.occursOn(e, '2026-10-26'), true);
+  assert.strictEqual(core.occursOn(e, '2026-10-29'), true);
+  assert.strictEqual(core.occursOn(e, '2026-11-01'), true);
+  assert.strictEqual(core.occursOn(e, '2026-10-25'), false);
+  assert.strictEqual(core.occursOn(e, '2026-11-02'), false);
+});
+
+test('时点类事件只在自己那一天命中', () => {
+  const e = { date: '2026-10-27', startTime: '14:00' };
+  assert.strictEqual(core.occursOn(e, '2026-10-27'), true);
+  assert.strictEqual(core.occursOn(e, '2026-10-28'), false);
+});
+
+test('isAllDayLike：时段类即使带时刻也进「全天」栏', () => {
+  assert.strictEqual(core.isAllDayLike({ date: '2026-10-26', endDate: '2026-11-01', startTime: '09:00' }), true);
+  assert.strictEqual(core.isAllDayLike({ date: '2026-10-26' }), true);
+  assert.strictEqual(core.isAllDayLike({ date: '2026-10-26', startTime: '09:00' }), false);
+});
+
+test('spanDays 含首尾，单日为 1', () => {
+  assert.strictEqual(core.spanDays({ date: '2026-10-26', endDate: '2026-11-01' }), 7);
+  assert.strictEqual(core.spanDays({ date: '2026-10-26' }), 1);
+});
+
+test('区间解析：跨月 / 同月省略 / 周区间 / 连续N天 / 一周内', () => {
+  const at = (t) => core.parseSpanRange(t, BASE);
+
+  assert.deepStrictEqual([at('10月26日到11月1日').date, at('10月26日到11月1日').endDate],
+    ['2026-10-26', '2026-11-01']);
+
+  assert.deepStrictEqual([at('10月26日到31日').date, at('10月26日到31日').endDate],
+    ['2026-10-26', '2026-10-31']);
+
+  // BASE 是 2026-10-31 周六：「这周一到周五」落在本周
+  assert.deepStrictEqual([at('这周一到周五').date, at('这周一到周五').endDate],
+    ['2026-10-26', '2026-10-30']);
+
+  assert.deepStrictEqual([at('连续七天每天跑步').date, at('连续七天每天跑步').endDate],
+    ['2026-10-31', '2026-11-06']);
+
+  assert.deepStrictEqual([at('一周内每天学慕课').date, at('一周内每天学慕课').endDate],
+    ['2026-10-26', '2026-11-01']);
+});
+
+test('没有持续性措辞时不误判为区间', () => {
+  assert.strictEqual(core.parseSpanRange('三天后交材料', BASE), null);
+  assert.strictEqual(core.parseSpanRange('明天下午三点开会', BASE), null);
+});
+
+test('localParse 产出 endDate，且单日事件 endDate 为 null', () => {
+  const [span] = core.localParse('这周一到周五每天下午两点学慕课', BASE);
+  assert.strictEqual(span.date, '2026-10-26');
+  assert.strictEqual(span.endDate, '2026-10-30');
+  assert.strictEqual(span.startTime, '14:00');
+
+  const [single] = core.localParse('明天下午三点半在樱顶开会', BASE);
+  assert.strictEqual(single.endDate, null);
+});
+
+test('只说了「每天」但没有任何日期线索 → 不猜日期', () => {
+  const list = core.localParse('每天背单词', BASE);
+  assert.strictEqual(list.length, 0);
+});
+
+console.log('\n时段类的展示');
+
+test('timeDisplay 输出区间、天数与每日时段', () => {
+  const line = core.timeDisplay({
+    date: '2026-10-26', endDate: '2026-11-01', startTime: '09:00', endTime: '10:00',
+  });
+  assert.strictEqual(line, '10月26日–11月1日（7 天）· 每天 09:00–10:00');
+});
+
+test('时段类便签仍按【事件名 - 时间 - 地点 - 详情】输出', () => {
+  const line = core.noteLine({
+    title: '计量慕课',
+    date: '2026-10-26',
+    endDate: '2026-11-01',
+    startTime: null,
+    location: null,
+    detail: '这周一到周日每天学计量慕课',
+  });
+  assert.strictEqual(line, '【计量慕课 - 10月26日–11月1日（7 天）· 全天 - 未提及 - 这周一到周日每天学计量慕课】');
+});
+
+test('指定日期查询：跨天事件在区间内每一天都能被筛出来', () => {
+  const list = [
+    { id: 'span', title: '慕课', date: '2026-10-26', endDate: '2026-10-30', detail: 'x' },
+    { id: 'one', title: '组会', date: '2026-10-28', startTime: '14:00', detail: 'y' },
+  ];
+  const onDate = (k) => list.filter((e) => core.occursOn(e, k)).map((e) => e.id);
+
+  assert.deepStrictEqual(onDate('2026-10-26'), ['span']);
+  assert.deepStrictEqual(onDate('2026-10-28'), ['span', 'one']);
+  assert.deepStrictEqual(onDate('2026-10-31'), []);
+});
+
 console.log(`\n结果：${passed} 通过 / ${failed} 失败\n`);
 process.exit(failed ? 1 : 0);

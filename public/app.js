@@ -30,12 +30,17 @@ const {
   addDays,
   startOfWeek,
   fmtDateCN,
+  fmtMonthDay,
   localParse,
   timeDisplay,
   noteLine,
   sortEvents,
   filterEvents,
   highlightHTML,
+  isSpan,
+  occursOn,
+  isAllDayLike,
+  spanDays,
 } = window.ScheduleCore;
 
 /* ------------------------------ 状态 ------------------------------ */
@@ -45,7 +50,9 @@ const state = {
   weekStart: startOfWeek(new Date()),
   selectedId: null,
   hasServerKey: false,
+  serverOnline: false,
   searchQuery: '',
+  agendaDate: dateKey(new Date()),
 };
 
 function fmtRange(a, b) {
@@ -65,6 +72,7 @@ function loadEvents() {
         id: e.id || makeId(),
         title: String(e.title),
         date: e.date || null,
+        endDate: e.endDate && e.date && e.endDate > e.date ? e.endDate : null,
         startTime: e.startTime || null,
         endTime: e.endTime || null,
         timeText: e.timeText || null,
@@ -115,16 +123,26 @@ function setStatus(message, type = '') {
 
 /* ------------------------------ 渲染：周视图 ------------------------------ */
 
+/** 某一天的全部日程：单日事件看 date，时段类事件看是否落在区间内 */
 function eventsOnDay(key) {
   return state.events
-    .filter((e) => e.date === key)
-    .sort((a, b) => (a.startTime || '99:99').localeCompare(b.startTime || '99:99'));
+    .filter((e) => occursOn(e, key))
+    .sort((a, b) => {
+      const ta = a.startTime || '99:99';
+      const tb = b.startTime || '99:99';
+      if (ta !== tb) return ta.localeCompare(tb);
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    });
 }
 
 function eventCardHTML(e) {
+  const span = isSpan(e);
+  // 全天栏里已有「N天」标记，不再重复「每天 」前缀，省下的宽度留给标题
   const time = e.startTime ? `<span class="ev-time">${esc(e.startTime)}</span>` : '';
-  const tip = [e.title, e.startTime || '', e.location || ''].filter(Boolean).join(' · ');
-  return `<div class="event p-${e.priority}${e.startTime ? ' has-time' : ''}" data-id="${esc(e.id)}" role="button" tabindex="0" title="${esc(tip)}">${time}<span class="ev-title">${esc(e.title)}</span></div>`;
+  const badge = span ? `<span class="ev-span" title="持续 ${spanDays(e)} 天">${spanDays(e)}天</span>` : '';
+  const tip = [e.title, span ? timeDisplay(e) : (e.startTime || ''), e.location || ''].filter(Boolean).join(' · ');
+  const cls = `event p-${e.priority}${e.startTime ? ' has-time' : ''}${span ? ' is-span' : ''}`;
+  return `<div class="${cls}" data-id="${esc(e.id)}" role="button" tabindex="0" title="${esc(tip)}">${badge}${time}<span class="ev-title">${esc(e.title)}</span></div>`;
 }
 
 function renderWeek() {
@@ -142,14 +160,14 @@ function renderWeek() {
     return `<th class="${isToday ? 'is-today' : ''}"><span class="dow">${WEEKDAY_CN[d.getDay()]}</span><span class="dom">${d.getDate()}</span></th>`;
   }).join('')}</tr>`;
 
-  /* 本周事件 */
-  const weekEvents = state.events.filter((e) => e.date && dayKeys.includes(e.date));
+  /* 本周事件（含跨越本周的时段类事件） */
+  const weekEvents = state.events.filter((e) => dayKeys.some((k) => occursOn(e, k)));
 
   /* 时间轴范围：默认 08–22，有更早/更晚的事件时自动扩展 */
   let startHour = 8;
   let endHour = 22;
   weekEvents.forEach((e) => {
-    if (!e.startTime) return;
+    if (!e.startTime || isSpan(e)) return;
     const h = parseInt(e.startTime.slice(0, 2), 10);
     if (Number.isFinite(h)) {
       startHour = Math.min(startHour, h);
@@ -166,19 +184,19 @@ function renderWeek() {
   const cellHTML = (key, list) =>
     `<td class="${key === todayKey ? 'is-today' : ''}"><div class="cell">${list.map(eventCardHTML).join('')}</div></td>`;
 
-  /* 全天 / 无具体时刻 */
+  /* 全天栏：时段类（持续多天）+ 时点类里没给具体时刻的 */
   chunks.push(`<tr class="allday-row"><th>全天</th>${dayKeys
-    .map((key) => cellHTML(key, eventsOnDay(key).filter((e) => !e.startTime)))
+    .map((key) => cellHTML(key, eventsOnDay(key).filter(isAllDayLike)))
     .join('')}</tr>`);
 
-  /* 逐小时 */
+  /* 逐小时：只放时点类事件 */
   for (let h = startHour; h < endHour; h += 1) {
     chunks.push(`<tr><th>${pad2(h)}:00</th>${dayKeys
       .map((key) =>
         cellHTML(
           key,
           eventsOnDay(key).filter(
-            (e) => e.startTime && parseInt(e.startTime.slice(0, 2), 10) === h
+            (e) => !isSpan(e) && e.startTime && parseInt(e.startTime.slice(0, 2), 10) === h
           )
         )
       )
@@ -282,51 +300,87 @@ function runSearch() {
   renderSearch();
 }
 
-/* ------------------------------ 今日日程 ------------------------------ */
+/* ------------------------------ 某日日程（今日 / 指定日期） ------------------------------ */
 
-/** 以本地时区的当前日期为准 */
-function todayEvents() {
-  const key = dateKey(new Date());
-  return allEventsSorted().filter((e) => e.date === key);
+/** 距离今天的相对称呼，只用于副标题提示 */
+function relativeDayLabel(key) {
+  const d = parseKey(key);
+  const t = new Date();
+  const diff = Math.round(
+    (Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+      - Date.UTC(t.getFullYear(), t.getMonth(), t.getDate())) / 86400000
+  );
+  const map = { '-2': '前天', '-1': '昨天', 0: '今天', 1: '明天', 2: '后天' };
+  if (map[diff] !== undefined) return map[diff];
+  return diff > 0 ? `${diff} 天后` : `${-diff} 天前`;
 }
 
-function todayItemHTML(e) {
-  const time = e.startTime
-    ? (e.endTime ? `${e.startTime}–${e.endTime}` : e.startTime)
+function eventsOnDate(key) {
+  return allEventsSorted().filter((e) => occursOn(e, key));
+}
+
+function agendaItemHTML(e) {
+  const span = isSpan(e);
+  const timeInner = e.startTime
+    ? `${span ? '<span class="ti-daily">每天</span>' : ''}${esc(e.startTime)}${e.endTime ? `–${esc(e.endTime)}` : ''}`
     : '全天';
-  const meta = `${e.location || '地点未提及'} · 优先级 ${PRIORITY_LABEL[e.priority]}`;
+
+  const meta = [
+    span ? `持续 ${fmtMonthDay(e.date)}–${fmtMonthDay(e.endDate)}（${spanDays(e)} 天）` : null,
+    e.location || '地点未提及',
+    `优先级 ${PRIORITY_LABEL[e.priority]}`,
+  ].filter(Boolean).join(' · ');
 
   return `<div class="today-item p-${e.priority}" data-id="${esc(e.id)}" role="button" tabindex="0" title="点击查看完整便签">
-    <div class="ti-time">${esc(time)}</div>
+    <div class="ti-time${span ? ' is-span' : ''}">${timeInner}</div>
     <div class="ti-body">
-      <div class="ti-title">${esc(e.title)}</div>
+      <div class="ti-title">${esc(e.title)}${span ? ' <span class="ti-badge">时段</span>' : ''}</div>
       <div class="ti-meta">${esc(meta)}</div>
       <div class="ti-detail">${esc(String(e.detail || '').trim() || '未提及')}</div>
     </div>
   </div>`;
 }
 
-function openTodayAgenda() {
-  const now = new Date();
-  const list = todayEvents();
+function renderAgenda() {
+  const key = state.agendaDate;
+  const d = parseKey(key);
+  const isToday = key === dateKey(new Date());
+  const list = eventsOnDate(key);
 
-  document.getElementById('todayDate').textContent =
-    `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${WEEKDAY_CN[now.getDay()]}` +
+  document.getElementById('agendaTitle').textContent = isToday ? '今日日程' : '日程查询';
+
+  document.getElementById('agendaDate').textContent =
+    `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${WEEKDAY_CN[d.getDay()]} · ${relativeDayLabel(key)}` +
     (list.length ? ` · 共 ${list.length} 个安排` : ' · 暂无安排');
 
-  const box = document.getElementById('todayList');
-  const emptyEl = document.getElementById('todayEmpty');
+  const box = document.getElementById('agendaList');
+  const emptyEl = document.getElementById('agendaEmpty');
 
   if (!list.length) {
     box.innerHTML = '';
     emptyEl.hidden = false;
-    emptyEl.textContent = '今天还没有安排。可以在右侧用一句话添加日程。';
+    emptyEl.textContent = isToday
+      ? '今天还没有安排。可以在右侧用一句话添加日程。'
+      : `${d.getMonth() + 1}月${d.getDate()}日还没有安排。`;
   } else {
     emptyEl.hidden = true;
-    box.innerHTML = list.map(todayItemHTML).join('');
+    box.innerHTML = list.map(agendaItemHTML).join('');
   }
 
-  showModal('todayModal');
+  document.getElementById('agendaTodayBtn').disabled = isToday;
+}
+
+function openAgenda(key) {
+  if (key && /^\d{4}-\d{2}-\d{2}$/.test(key)) state.agendaDate = key;
+  document.getElementById('dateQueryInput').value = state.agendaDate;
+  renderAgenda();
+  showModal('agendaModal');
+}
+
+function shiftAgenda(delta) {
+  state.agendaDate = dateKey(addDays(parseKey(state.agendaDate), delta));
+  document.getElementById('dateQueryInput').value = state.agendaDate;
+  renderAgenda();
 }
 
 /* ------------------------------ 便签弹窗 ------------------------------ */
@@ -344,7 +398,7 @@ function openNote(id) {
     <div class="note-head">
       <div class="prio-bar" style="background:var(--p-${e.priority})"></div>
       <div>
-        <h3>${esc(e.title)}</h3>
+        <h3>${esc(e.title)}${isSpan(e) ? `<span class="note-badge">时段 · ${spanDays(e)} 天</span>` : ''}</h3>
         <p class="note-source">${SOURCE_LABEL[e.source]} · 创建于 ${stamp}</p>
       </div>
     </div>
@@ -545,8 +599,38 @@ function updateEngineTag() {
   const localKey = (localStorage.getItem(STORAGE_KEY) || '').trim();
   const ready = Boolean(localKey || state.hasServerKey);
   const tag = document.getElementById('engineTag');
+
+  if (!state.serverOnline) {
+    tag.textContent = '本地服务未连接';
+    tag.classList.add('local');
+    return;
+  }
+
   tag.textContent = ready ? 'DeepSeek 已就绪' : '未配置 API Key';
   tag.classList.toggle('local', !ready);
+}
+
+/** 顶部横条：本地服务不在线时给出可执行的处置说明，而不是让用户去怀疑密钥 */
+function setOffline(offline) {
+  const banner = document.getElementById('offlineBanner');
+  if (banner) banner.hidden = !offline;
+}
+
+/** 探测本地服务是否在线，顺带拿服务端是否已配环境变量密钥 */
+async function checkServer() {
+  try {
+    const res = await fetch('/api/config', { cache: 'no-store' });
+    if (!res.ok) throw new Error(String(res.status));
+    const cfg = await res.json();
+    state.hasServerKey = Boolean(cfg.hasServerKey);
+    state.serverOnline = true;
+  } catch {
+    state.hasServerKey = false;
+    state.serverOnline = false;
+  }
+  updateEngineTag();
+  setOffline(!state.serverOnline);
+  return state.serverOnline;
 }
 
 function openSettings() {
@@ -599,7 +683,15 @@ async function handleExtract() {
       }),
     });
 
-    const data = await res.json();
+    // 不直接 res.json()：若中间有代理/网关插入 502 页面，JSON 解析会抛
+    // "Unexpected token '<'"，比真正的错误更难懂
+    const rawText = await res.text();
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      throw new Error(`本地服务返回了非 JSON 响应（HTTP ${res.status}）`);
+    }
 
     if (!data.ok) {
       // 只有「AI 侧不可用」才降级到本地规则；密钥/余额/限流属于需要用户处理的问题，直接报错
@@ -618,7 +710,6 @@ async function handleExtract() {
       setStatus(`解析失败：${data.message}`, 'error');
       return;
     }
-
     if (!data.events.length) {
       setStatus('没有识别到日程事件，试试说得更具体些，比如加上「明天下午三点」。', 'error');
       return;
@@ -630,14 +721,22 @@ async function handleExtract() {
     const pendingCount = data.events.filter((e) => !e.date).length;
     if (pendingCount) toast(`${pendingCount} 个事件缺少日期，已放入「待安排」`);
   } catch (err) {
-    // 网络层失败：降级本地解析，保证工具仍然可用
+    // 网络层失败最容易误判：浏览器抛的 TypeError 只有一句 "Failed to fetch"，
+    // 真实原因通常是本地 Node 服务没在跑（跟 API Key 一点关系都没有）
+    const offline = err instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(err.message || '');
+    if (offline) setOffline(true);
+
+    const reason = offline
+      ? '本地服务未连接（AI 解析需要 node server.js 提供的本地服务）'
+      : `解析失败：${err.message}`;
+
     const localEvents = localParse(text);
     if (localEvents.length) {
       applyExtracted(localEvents, text, 'local');
-      setStatus(`AI 调用失败（${err.message}），已改用本地规则解析。`, 'error');
+      setStatus(`${reason}，已改用本地规则解析。`, 'error');
       input.value = '';
     } else {
-      setStatus(`解析失败：${err.message}`, 'error');
+      setStatus(offline ? `${reason}，本地规则也没能识别出事件。` : `${reason}`, 'error');
     }
   } finally {
     btn.disabled = false;
@@ -647,19 +746,24 @@ async function handleExtract() {
 
 function applyExtracted(list, rawText, source) {
   const now = Date.now();
-  const created = list.map((item, i) => ({
-    id: `e_${now.toString(36)}_${i}_${Math.random().toString(36).slice(2, 5)}`,
-    title: String(item.title || '').trim() || '未命名事件',
-    date: item.date || null,
-    startTime: item.startTime || null,
-    endTime: item.endTime || null,
-    timeText: item.timeText || null,
-    location: item.location || null,
-    detail: rawText,
-    priority: PRIORITY_LABEL[item.priority] ? item.priority : 'medium',
-    source,
-    createdAt: now + i,
-  }));
+  const created = list.map((item, i) => {
+    const date = item.date || null;
+    const endDate = item.endDate && date && item.endDate > date ? item.endDate : null;
+    return {
+      id: `e_${now.toString(36)}_${i}_${Math.random().toString(36).slice(2, 5)}`,
+      title: String(item.title || '').trim() || '未命名事件',
+      date,
+      endDate,
+      startTime: item.startTime || null,
+      endTime: item.endTime || null,
+      timeText: item.timeText || null,
+      location: item.location || null,
+      detail: rawText,
+      priority: PRIORITY_LABEL[item.priority] ? item.priority : 'medium',
+      source,
+      createdAt: now + i,
+    };
+  });
 
   state.events.push(...created);
   saveEvents();
@@ -747,21 +851,44 @@ function bindUI() {
     openNote(item.dataset.id);
   });
 
-  /* 今日日程 */
-  document.getElementById('todayAgendaBtn').addEventListener('click', openTodayAgenda);
-  document.getElementById('todayClose').addEventListener('click', hideModal);
+  /* 日程查询：今日按钮 + 指定日期 */
+  document.getElementById('dateQueryBtn').addEventListener('click', () => {
+    const value = document.getElementById('dateQueryInput').value;
+    openAgenda(value || dateKey(new Date()));
+  });
 
-  document.getElementById('todayList').addEventListener('click', (ev) => {
+  document.getElementById('dateQueryInput').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      document.getElementById('dateQueryBtn').click();
+    }
+  });
+
+  document.getElementById('agendaPrevDay').addEventListener('click', () => shiftAgenda(-1));
+  document.getElementById('agendaNextDay').addEventListener('click', () => shiftAgenda(1));
+  document.getElementById('agendaTodayBtn').addEventListener('click', () => {
+    state.agendaDate = dateKey(new Date());
+    document.getElementById('dateQueryInput').value = state.agendaDate;
+    renderAgenda();
+  });
+  document.getElementById('agendaClose').addEventListener('click', hideModal);
+
+  document.getElementById('agendaList').addEventListener('click', (ev) => {
     const item = ev.target.closest('.today-item');
     if (item) openNote(item.dataset.id);
   });
 
-  document.getElementById('todayList').addEventListener('keydown', (ev) => {
+  document.getElementById('agendaList').addEventListener('keydown', (ev) => {
     if (ev.key !== 'Enter' && ev.key !== ' ') return;
     const item = ev.target.closest('.today-item');
     if (!item) return;
     ev.preventDefault();
     openNote(item.dataset.id);
+  });
+
+  document.getElementById('retryConnBtn').addEventListener('click', async () => {
+    const ok = await checkServer();
+    toast(ok ? '本地服务已连接' : '仍未连接，请确认 start.bat 窗口还开着');
   });
 
   document.getElementById('extractBtn').addEventListener('click', handleExtract);
@@ -842,17 +969,26 @@ async function init() {
     state.weekStart = startOfWeek(parseKey(savedWeek));
   }
 
+  state.agendaDate = dateKey(new Date());
+  document.getElementById('dateQueryInput').value = state.agendaDate;
+
   bindUI();
   renderAll();
 
-  try {
-    const res = await fetch('/api/config');
-    const cfg = await res.json();
-    state.hasServerKey = Boolean(cfg.hasServerKey);
-  } catch {
-    state.hasServerKey = false;
+  // 支持 ?agenda=YYYY-MM-DD 深链，打开即定位到某天
+  const deepLink = new URLSearchParams(location.search).get('agenda');
+  if (deepLink) openAgenda(deepLink);
+
+  // file:// 直接打开时不可能连上 /api，先给出明确提示，别等用户点完才报错
+  if (location.protocol === 'file:') {
+    state.serverOnline = false;
+    updateEngineTag();
+    setOffline(true);
+    setStatus('当前是直接打开的本地文件，AI 解析不可用。请运行 start.bat 后访问 http://127.0.0.1:5173', 'error');
+    return;
   }
-  updateEngineTag();
+
+  await checkServer();
 }
 
 init();

@@ -11,6 +11,7 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pipeline } = require('node:stream/promises');
 
 const PORT = Number(process.env.PORT) || 5173;
 const HOST = process.env.HOST || '127.0.0.1';
@@ -91,9 +92,17 @@ function normalizeEvent(raw) {
   const isTime = (v) => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
   const priority = ['high', 'medium', 'low'].includes(raw && raw.priority) ? raw.priority : 'medium';
 
+  const date = isDate(raw && raw.date) ? raw.date : null;
+  let endDate = isDate(raw && raw.endDate) ? raw.endDate : null;
+
+  // 时段类（跨天）只在「有起点 + 终点晚于起点」时成立，其余一律收敛为单日
+  if (!date) endDate = null;
+  else if (endDate && endDate <= date) endDate = null;
+
   return {
     title: str(raw && raw.title),
-    date: isDate(raw && raw.date) ? raw.date : null,
+    date,
+    endDate,
     startTime: isTime(raw && raw.startTime) ? raw.startTime : null,
     endTime: isTime(raw && raw.endTime) ? raw.endTime : null,
     timeText: str(raw && raw.timeText),
@@ -119,9 +128,14 @@ function buildSystemPrompt(today, weekday) {
 7. priority：仅当原文出现明确的紧迫或重要表述（如"紧急""务必""重要""不能迟到"）时为 "high"；原文明确表示"不急""有空再说""随便"时为 "low"；其余情况一律 "medium"。
 8. timeText：原文中描述该事件时间的片段，原样摘录，用于人工核对；没有则为 null。
 9. 原文包含多个事件时，每个事件单独一项，不要合并。
+10. endDate：只有当事件本身跨越连续多天（时段类）时才填写，格式 YYYY-MM-DD，且必须晚于 date；单日事件一律为 null。
+    判断依据：
+    - "10月26日到11月1日""这周一到周五""一周内每天背单词""连续七天" → 时段类，endDate 填这个区间的最后一天。
+    - "明天下午三点开会""周五晚上七点""10月28日上午九点到十一点查文献" → 单日事件（哪怕有起止时刻），endDate 为 null。
+    - 只说了"每天"但没有任何日期范围线索（连起点都没有）→ date 和 endDate 都为 null。
 
 输出格式（不要 markdown 代码块，不要任何解释文字）：
-{"events":[{"title":"","date":null,"startTime":null,"endTime":null,"timeText":null,"location":null,"priority":"medium"}]}
+{"events":[{"title":"","date":null,"endDate":null,"startTime":null,"endTime":null,"timeText":null,"location":null,"priority":"medium"}]}
 
 原文中不存在可识别的日程事件时，输出 {"events":[]}。`;
 }
@@ -202,6 +216,20 @@ async function callDeepSeek({ text, apiKey, today, weekday, model }) {
         fallback: true,
       });
     }
+
+    // 服务端自身连不上 DeepSeek（DNS / TLS / 代理），与浏览器那侧的 Failed to fetch 不是一回事，
+    // 必须给出可分辨的文案，否则用户只会反复怀疑 API Key
+    if (error.name === 'TypeError' && /fetch failed/i.test(error.message)) {
+      const cause = error.cause || {};
+      const detail = cause.code || cause.message || '网络不可达';
+      throw Object.assign(new Error(`本地服务无法连接 DeepSeek（${detail}），请检查网络或代理设置`), {
+        status: 502,
+        code: 'NETWORK',
+        fallback: true,
+        upstream: String(detail),
+      });
+    }
+
     throw error;
   } finally {
     clearTimeout(timer);
@@ -211,8 +239,17 @@ async function callDeepSeek({ text, apiKey, today, weekday, model }) {
 /* ------------------------------ 路由 ------------------------------ */
 
 async function serveStatic(req, res, pathname) {
-  const relative = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
-  const filePath = path.resolve(PUBLIC_DIR, relative);
+  let filePath;
+
+  try {
+    const relative = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
+    filePath = path.resolve(PUBLIC_DIR, relative);
+  } catch {
+    // decodeURIComponent 遇到畸形百分号编码会抛 URIError；不接住就会掀掉整个进程
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('400 Bad Request');
+    return;
+  }
 
   // 防目录穿越
   if (filePath !== PUBLIC_DIR && !filePath.startsWith(PUBLIC_DIR + path.sep)) {
@@ -231,15 +268,28 @@ async function serveStatic(req, res, pathname) {
       'Content-Length': stat.size,
       'Cache-Control': 'no-store, no-cache, must-revalidate',
     });
-    fs.createReadStream(filePath).pipe(res);
+
+    // 旧写法 createReadStream().pipe(res) 没人监听读流错误：客户端中途取消、
+    // 文件被移动都会冒成未捕获异常，本地服务就这么静默退出了。用 pipeline 接管。
+    await pipeline(fs.createReadStream(filePath), res);
   } catch {
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('404 Not Found');
   }
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+async function handleRequest(req, res) {
+  let url;
+  try {
+    url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  } catch {
+    sendJson(res, 400, { ok: false, code: 'BAD_URL', message: '请求地址不合法' });
+    return;
+  }
   const pathname = url.pathname;
 
   // 同源部署，不开放跨域；如需独立前端可在此放开
@@ -313,11 +363,37 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET') {
-    serveStatic(req, res, pathname);
+    await serveStatic(req, res, pathname);
     return;
   }
 
   sendJson(res, 405, { ok: false, message: '不支持的请求方法' });
+}
+
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch((error) => {
+    console.error('[request] 未处理异常:', error && error.stack ? error.stack : error);
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
+    sendJson(res, 500, { ok: false, code: 'SERVER_ERROR', message: '本地服务内部错误', fallback: false });
+  });
+});
+
+// 浏览器发来畸形请求时只断开这一条连接，不要让它升级成进程级异常
+server.on('clientError', (error, socket) => {
+  if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+  else socket.destroy();
+});
+
+// 最后一道防线：本地小工具宁可留下一条错误日志继续跑，也不要静默退出——
+// 一旦退出，前端所有 /api 请求都会变成 "Failed to fetch"，用户根本看不出是服务没了
+process.on('uncaughtException', (error) => {
+  console.error('[fatal] 未捕获异常（服务继续运行）:', error && error.stack ? error.stack : error);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] 未处理的 Promise 拒绝（服务继续运行）:', reason && reason.stack ? reason.stack : reason);
 });
 
 server.listen(PORT, HOST, () => {
@@ -328,12 +404,16 @@ server.listen(PORT, HOST, () => {
   console.log(`  本地地址   http://${HOST}:${PORT}`);
   console.log(`  DeepSeek   ${DEEPSEEK_BASE}`);
   console.log(`  API Key    ${ENV_KEY ? '已通过环境变量配置' : '未配置（可在页面右上角「设置」中填写）'}`);
-  console.log(`${line}\n  按 Ctrl+C 停止服务\n`);
+  console.log(`${line}\n  按 Ctrl+C 停止服务；关闭这个窗口 AI 解析就会失效\n`);
 });
 
 server.on('error', (error) => {
   if (error.code === 'EADDRINUSE') {
-    console.error(`端口 ${PORT} 已被占用，可换一个端口启动：PORT=5174 node server.js`);
+    console.error(
+      `\n端口 ${PORT} 已被占用。\n` +
+        `  · 如果之前的窗口还开着，服务其实已经在跑，直接访问 http://${HOST}:${PORT} 即可；\n` +
+        `  · 想换端口启动：PORT=5174 node server.js\n`
+    );
   } else {
     console.error('服务启动失败:', error.message);
   }

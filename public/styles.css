@@ -394,21 +394,23 @@ button { cursor: pointer; }
 .week-table tbody td:hover { background: var(--surface-alt); }
 
 .week-table tbody tr.allday-row td {
-  height: 34px;
+  /* 高度随「当天有几天条时段卡」自适应，写死 36px 会把两条卡压扁 */
+  height: auto;
   background: var(--surface-alt);
-  padding: 0;
-  vertical-align: middle;
+  padding: 2px 0;
+  vertical-align: top;
 }
 
 .week-table tbody tr.allday-row .cell {
-  justify-content: center;
-  padding: 3px 4px;
+  justify-content: flex-start;
+  padding: 5px 4px;
 }
 
 .week-table tbody tr.allday-row th {
   background: var(--surface-alt);
   font-size: 10.5px;
   padding-top: 8px;
+  vertical-align: middle;
   color: var(--ink-3);
 }
 
@@ -482,11 +484,68 @@ button { cursor: pointer; }
 }
 .event.p-low .ev-time { color: var(--p-low); }
 
-/* 全天/无时刻事件用紧凑胶囊 */
+/* 全天/无时刻事件：标题独占一行，时长与时刻缩到第二行，列窄也不至于只剩省略号 */
 .allday-row .event {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 4px;
+  row-gap: 1px;
   margin-bottom: 0;
-  padding: 2px 6px;
-  font-size: 11.5px;
+  padding: 3px 5px;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow: hidden;
+}
+
+.allday-row .event .ev-span {
+  font-size: 9px;
+  padding: 0 3px;
+  line-height: 1.5;
+}
+
+.allday-row .event .ev-time { font-size: 9.5px; }
+
+/* 标题排第一行并占满整行，徽标与时刻退到第二行 */
+.allday-row .event .ev-title,
+.allday-row .event.has-time .ev-title {
+  order: 1;
+  display: block;
+  flex: 1 0 100%;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.allday-row .event .ev-span { order: 2; }
+.allday-row .event .ev-time { order: 3; }
+
+.allday-row .event .ev-time,
+.allday-row .event .ev-span {
+  flex: 0 0 auto;
+  margin-right: 0;
+}
+
+/* 时段类（持续多天）标记 */
+.ev-span {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(23, 50, 79, .08);
+  color: var(--ink-2);
+  font-size: 9.5px;
+  line-height: 1.55;
+  letter-spacing: .2px;
+  vertical-align: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.event.is-span {
+  border-top: 1px dashed rgba(23, 50, 79, .16);
+  border-bottom: 1px dashed rgba(23, 50, 79, .16);
 }
 
 .empty-hint {
@@ -719,6 +778,67 @@ textarea#naturalInput:focus {
 }
 
 .today-agenda-btn:hover { background: var(--navy); color: #fff; }
+
+/* 指定日期查询 */
+.date-query {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.date-query input[type="date"] {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.date-query input[type="date"]:focus {
+  outline: none;
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px rgba(23, 50, 79, .08);
+}
+
+/* 本地服务未连接提示条 */
+.offline-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex: 0 0 auto;
+  padding: 9px 22px;
+  background: var(--p-medium-bg);
+  border-bottom: 1px solid var(--p-medium-line);
+  color: #7b5613;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.offline-banner[hidden] { display: none; }
+.offline-banner strong { font-weight: 600; }
+.offline-banner .ob-text { min-width: 0; }
+
+.offline-banner code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .75);
+  border: 1px solid var(--p-medium-line);
+  font-size: 11px;
+}
+
+.offline-banner .tiny-btn {
+  flex: 0 0 auto;
+  height: 26px;
+  background: #fff;
+  border-color: var(--p-medium-line);
+  color: #7b5613;
+}
 
 .search-row {
   display: flex;
@@ -958,6 +1078,20 @@ textarea#naturalInput:focus {
   color: var(--ink-3);
 }
 
+.note-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 20px;
+  background: var(--navy-soft);
+  color: var(--navy);
+  border: 1px solid #d3dfeb;
+  font-size: 10.5px;
+  font-weight: 500;
+  vertical-align: 2px;
+  white-space: nowrap;
+}
+
 .note-fields {
   border-top: 1px solid var(--line);
   margin-bottom: 4px;
@@ -1126,6 +1260,45 @@ textarea#naturalInput:focus {
   padding-top: 1px;
   white-space: nowrap;
 }
+
+.today-item .ti-time.is-span {
+  flex: 0 0 70px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: normal;
+  word-break: keep-all;
+}
+
+.ti-daily {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 500;
+  color: var(--ink-3);
+  letter-spacing: .3px;
+}
+
+.ti-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--navy-soft);
+  color: var(--navy);
+  font-size: 9.5px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+
+/* 日程查询的日期切换 */
+.agenda-nav {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.agenda-nav .tiny-btn { height: 26px; }
+.tiny-btn[disabled] { opacity: .45; cursor: default; }
+.tiny-btn[disabled]:hover { border-color: var(--line-strong); color: var(--ink-2); }
 
 .today-item .ti-body { flex: 1 1 auto; min-width: 0; }
 
@@ -1300,6 +1473,8 @@ textarea#naturalInput:focus {
   /* 面板头在窄屏可换行，避免「今日日程」按钮挤压图例 */
   .panel-head { padding: 10px 12px; flex-wrap: wrap; gap: 8px; }
   .panel-head-right { gap: 10px; }
+  .date-query { width: 100%; }
+  .date-query input[type="date"] { flex: 1 1 auto; min-width: 0; }
 
   /* 窄屏下按钮换行，取消右推，避免溢出 */
   .composer-actions { flex-wrap: wrap; }

@@ -27,6 +27,14 @@
       </div>
     </header>
 
+    <div class="offline-banner" id="offlineBanner" hidden>
+      <span class="ob-text">
+        <strong>本地服务未连接</strong>：AI 智能提取需要本地 Node 服务（周视图、搜索、日程查询可离线使用）。请双击
+        <code>start.bat</code> 启动，再用 <code>http://127.0.0.1:5173</code> 打开页面（直接双击 index.html 不行）。
+      </span>
+      <button id="retryConnBtn" class="tiny-btn" type="button">重试连接</button>
+    </div>
+
     <main class="layout">
       <section class="calendar-panel">
         <div class="panel-head">
@@ -37,7 +45,10 @@
               <span class="legend-item"><i class="dot p-medium"></i>中</span>
               <span class="legend-item"><i class="dot p-low"></i>低</span>
             </div>
-            <button id="todayAgendaBtn" class="today-agenda-btn" type="button">今日日程</button>
+            <div class="date-query">
+              <input id="dateQueryInput" type="date" aria-label="选择要查看的日期">
+              <button id="dateQueryBtn" class="today-agenda-btn" type="button">查看日程</button>
+            </div>
           </div>
         </div>
         <div class="calendar-scroll" id="calendarScroll">
@@ -70,7 +81,7 @@
             <h2>AI 添加日程</h2>
             <span class="tag" id="engineTag">DeepSeek</span>
           </div>
-          <textarea id="naturalInput" rows="5" placeholder="用一句话描述，例如：&#10;明天下午三点半在樱顶开会，讨论毕业论文选题；周五晚上七点线上腾讯会议，聊课题进展。"></textarea>
+          <textarea id="naturalInput" rows="5" placeholder="用一句话描述，例如：&#10;明天下午三点半在樱顶开会，讨论毕业论文选题；周五晚上七点线上腾讯会议，聊课题进展。&#10;也可以描述持续多天的事：这周一到周五每天下午两点学慕课。"></textarea>
           <div class="composer-actions">
             <button id="extractBtn" class="primary-btn">
               <span class="btn-label">提取并添加</span>
@@ -101,13 +112,20 @@
     <div id="noteContent"></div>
   </div>
 
-  <!-- 今日日程 -->
-  <div class="modal today-modal" id="todayModal" hidden role="dialog" aria-modal="true" aria-label="今日日程">
-    <button class="modal-close" id="todayClose" aria-label="关闭">×</button>
-    <h2 class="modal-title">今日日程</h2>
-    <p class="today-date" id="todayDate"></p>
-    <div class="today-list" id="todayList"></div>
-    <p class="modal-empty" id="todayEmpty" hidden></p>
+  <!-- 日程查询（默认今天，可查任意日期） -->
+  <div class="modal today-modal" id="agendaModal" hidden role="dialog" aria-modal="true" aria-label="日程查询">
+    <button class="modal-close" id="agendaClose" aria-label="关闭">×</button>
+    <h2 class="modal-title" id="agendaTitle">今日日程</h2>
+    <p class="today-date" id="agendaDate"></p>
+
+    <div class="agenda-nav" role="group" aria-label="切换日期">
+      <button class="tiny-btn" id="agendaPrevDay" type="button">‹ 前一天</button>
+      <button class="tiny-btn" id="agendaTodayBtn" type="button">回到今天</button>
+      <button class="tiny-btn" id="agendaNextDay" type="button">后一天 ›</button>
+    </div>
+
+    <div class="today-list" id="agendaList"></div>
+    <p class="modal-empty" id="agendaEmpty" hidden></p>
   </div>
 
   <!-- 设置 -->
@@ -137,6 +155,7 @@
         <li>前端：原生 HTML / CSS / JavaScript 单页，无框架、无构建步骤</li>
         <li>后端：Node.js 原生 http 模块（零 npm 依赖），负责静态托管与 DeepSeek 代理</li>
         <li>模型：deepseek-chat，JSON 模式输出，temperature 0.1</li>
+        <li>日程类型：时点类（某天某时）与时段类（连续多天，体现在周视图「全天」栏）</li>
         <li>存储：浏览器 localStorage</li>
       </ul>
     </div>
