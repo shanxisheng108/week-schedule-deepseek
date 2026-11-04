@@ -45,7 +45,7 @@ node server.js
 | 4 配密钥（可选） | `DEEPSEEK_API_KEY=… node server.js` | DeepSeek 账号 | 日志显示「已通过环境变量配置」 |
 | 5 启动服务 | `node server.js` | Node ≥ 18 | 打印 `http://127.0.0.1:5173` |
 | 6 打开浏览器 | 访问 `http://127.0.0.1:5173` | Chrome / Edge / Firefox | 出现周视图与右侧三块面板 |
-| 7 跑测试 | `node test/core.test.js` | Node ≥ 18（`node:assert` 内置） | `21 通过 / 0 失败` |
+| 7 跑测试 | `node test/core.test.js` | Node ≥ 18（`node:assert` 内置） | `33 通过 / 0 失败` |
 
 ### 第 1 步：确认 Node 版本
 
@@ -312,7 +312,7 @@ set DEEPSEEK_API_KEY=sk-xxxxxxxx && node server.js
 
 - 时段类不靠「每天」硬猜，必须有原文写明的区间：`10月26日到11月1日`、`10月26日至31日`、`这周一到周五`、`连续七天`、`一周内` 都能识别；只写「每天」却没有任何日期线索时不猜，事件进入「待安排」；
 - 数据上只多一个 `endDate` 字段（`null` 表示单日），服务端 `normalizeEvent()` 会校验 `endDate > date`，同一天或早于起点一律收敛为 `null`；
-- 卡片左上角的 `7天` 是持续天数徽标，`.is-span` 加虚线上下边框做视觉区分；全天行空间有限，标记 / 时刻 / 标题压在一行，超出用省略号，完整信息在悬浮提示里；
+- 卡片左上角的 `7天` 是持续天数徽标，`.is-span` 加虚线上下边框做视觉区分；全天行里每张卡排成两行——标题独占第一行（超出省略），徽标与时刻退到第二行，列再窄也不会只剩省略号；完整信息在悬浮提示里；
 - 便签里时间行写作 `11月2日–11月8日（7 天）· 每天 08:30`，标准格式行仍是【事件名 - 时间 - 地点 - 详情】。
 
 ---
@@ -326,6 +326,7 @@ set DEEPSEEK_API_KEY=sk-xxxxxxxx && node server.js
 ├── start.bat            # Windows 双击启动
 ├── README.md
 ├── .gitignore           # 排除 node_modules / .env / 本地工作目录
+├── .gitattributes       # 行尾规范化（GitHub Desktop 建仓时自动生成）
 ├── images/              # README 引用的截图
 │   ├── week-view.png    # 周视图
 │   └── note-modal.png   # 事件详情弹窗
